@@ -1,7 +1,8 @@
 const Big       = require("big.js"); // float safe math
-const got       = require("got"); // <!!!!  got@11 specific version
-const ed25519   = require('ed25519');
-const crypto    = require('crypto');
+const axios = require('axios'); // <!!!!  got@11 specific version
+const nacl = require('tweetnacl');
+const { decodeUTF8, decodeHex } = require('tweetnacl-util');
+const CryptoJS = require('react-native-crypto-js');
 const bip39     = require('bip39');
 
 class PandaniteApi {
@@ -26,38 +27,33 @@ class PandaniteApi {
     
     */
     
-    getNetworkInfo() {
-        return new Promise((resolve, reject) => {
-            (async () => {
-
-                try {
-
-                    
-                    var body = await got.get(this.apiUrl + "/block_count").json();
-
-                    var height = body;
-
-                    var version = 1;
-
-                    var blockinfo = await this.getBlock(height);
-
-                    // Base Response, you may add additional info
-                    var inforesponse = {
-                        version: version,
-                        blockheight: height,
-                        lastblock: blockinfo.blocktime
-                    };
-
-                    resolve(inforesponse);
-
-                    
-                } catch (e) {
-                    reject(e);
-                }
-                
-            })();
-        })
-    }
+        getNetworkInfo() {
+            return new Promise((resolve, reject) => {
+                (async () => {
+                    try {
+                        const response = await axios.get(this.apiUrl + "/block_count");
+                        const height = response.data;
+        
+                        const version = 1;
+        
+                        const blockInfoResponse = await axios.get(this.apiUrl + `/blocks_info/${height}`);
+                        const blockinfo = blockInfoResponse.data;
+        
+                        // Base Response, you may add additional info
+                        const inforesponse = {
+                            version: version,
+                            blockheight: height,
+                            lastblock: blockinfo.blocktime
+                        };
+        
+                        resolve(inforesponse);
+        
+                    } catch (e) {
+                        reject(e);
+                    }
+                })();
+            });
+        }
     
     /*
     
@@ -65,75 +61,58 @@ class PandaniteApi {
     
     */
 
-    getBlock(blockheight) {
-        return new Promise((resolve, reject) => {
-            (async () => {
-            
-                try {
-                
-                    var body = await got.get(this.apiUrl + "/block?blockId=" + blockheight).json(); 
-
-                    if (body && body.id)
-                    {
-                    
-                        const unhexlify = function(str) { 
-                          var result = [];
-                          while (str.length >= 2) { 
-                            result.push(parseInt(str.substring(0, 2), 16));
-                            str = str.substring(2, str.length);
-                          }
-                          return new Uint8Array(result);
+        getBlock(blockheight) {
+            return new Promise((resolve, reject) => {
+                (async () => {
+                    try {
+                        const response = await axios.get(this.apiUrl + "/block?blockId=" + blockheight);
+                        const body = response.data;
+        
+                        if (body && body.id) {
+                            const unhexlify = function(str) {
+                                const result = [];
+                                while (str.length >= 2) {
+                                    result.push(parseInt(str.substring(0, 2), 16));
+                                    str = str.substring(2, str.length);
+                                }
+                                return new Uint8Array(result);
+                            };
+        
+                            const generateBlockHash = function(block) {
+                                let wordArray1 = CryptoJS.enc.Hex.parse(block["merkleRoot"]);
+                                let wordArray2 = CryptoJS.enc.Hex.parse(block["lastBlockHash"]);
+                                let hexdiff = (parseInt(block["difficulty"]).toString(16).padStart(8, '0'));
+                                let hexdiffa = hexdiff.split('').reverse().join('');
+                                let wordArray3 = CryptoJS.enc.Hex.parse(hexdiffa);
+                                let hextimestamp = (parseInt(block["timestamp"]).toString(16).padStart(16, '0'));
+                                let hextimestampa = hextimestamp.split('').reverse().join('');
+                                let wordArray4 = CryptoJS.enc.Hex.parse(hextimestampa);
+        
+                                let combinedArray = wordArray1.concat(wordArray2).concat(wordArray3).concat(wordArray4);
+                                let combinedWordArray = CryptoJS.lib.WordArray.create(combinedArray);
+        
+                                let blockHash = CryptoJS.SHA256(combinedWordArray).toString(CryptoJS.enc.Hex);
+                                return blockHash;
+                            };
+        
+                            const inforesponse = {
+                                height: body.id,
+                                blockhash: generateBlockHash(body),
+                                blocktime: new Date(body.timestamp * 1000),
+                                transactions: body.transactions,
+                                raw: body
+                            };
+        
+                            resolve(inforesponse);
+                        } else {
+                            reject("Not Found");
                         }
-                    
-                        const generateBlockHash = function(block) {
-                            let ctx = crypto.createHash('sha256');
-                            ctx.update(unhexlify(block["merkleRoot"]));
-                            ctx.update(unhexlify(block["lastBlockHash"]));
-
-                            let hexdiff = Buffer.from(parseInt(block["difficulty"]).toString(16).padStart(8, '0'), 'hex');
-                            let hexdiffa = Buffer.from(hexdiff).toJSON().data;
-                            hexdiffa.reverse();
-                            let swapdiff = Buffer.from(hexdiffa).toString('hex');
-                            ctx.update(unhexlify(swapdiff));
-
-                            let hextimestamp = Buffer.from(parseInt(block["timestamp"]).toString(16).padStart(16, '0'), 'hex');
-                            let hextimestampa = Buffer.from(hextimestamp).toJSON().data;
-                            hextimestampa.reverse();
-                            let swaptimestamp = Buffer.from(hextimestampa).toString('hex');
-                            ctx.update(unhexlify(swaptimestamp));
-
-                            let blockHash = ctx.digest('hex');
-                            return blockHash;
-                        }
-
-                        // Base Response, you may add additional info
-                        var inforesponse = {
-                            height: body.id,
-                            blockhash: generateBlockHash(body),
-                            blocktime: new Date(body.timestamp * 1000),
-                            transactions: body.transactions,
-                            raw: body
-                        };
-
-                        resolve(inforesponse);
-                
+                    } catch (e) {
+                        reject(e);
                     }
-                    else
-                    {
-                
-                        reject("Not Found");
-                
-                    }
-                
-
-                
-                } catch (e) {
-                    reject(e);
-                }
-                
-            })();
-        })
-    }
+                })();
+            });
+        }
     
     /*
     
@@ -141,114 +120,86 @@ class PandaniteApi {
     
     */
 
-    getTransaction(transactionid) {
-        return new Promise((resolve, reject) => {
-            (async () => {
-            
-                try {
-                
-                    transactionid = transactionid.toUpperCase();
-
-                    var body = await got.post(this.apiUrl + "/verify_transaction", {json: [{"txid": transactionid}]}).json();   
-
-                    var seederAddress = "";
-
-                    if (body[0].status == "IN_CHAIN")
-                    {
-                    
-                        let blockInfo;
-                        let blockTrx = [];
-                        
-                        try {
-                        
-                            blockInfo = await this.getBlock(body[0].blockId);
-                            blockTrx = blockInfo.transactions;
-                        
-                        } catch (e) {
-                        
-                            reject('Not Found');
+        getTransaction(transactionid) {
+            return new Promise((resolve, reject) => {
+                (async () => {
+                    try {
+                        transactionid = transactionid.toUpperCase();
+        
+                        // Axios POST request
+                        const response = await axios.post(this.apiUrl + "/verify_transaction", {
+                            txid: transactionid
+                        });
+                        const body = response.data;
+        
+                        var seederAddress = "";
+        
+                        if (body[0].status == "IN_CHAIN") {
+                            let blockInfo;
+                            let blockTrx = [];
                             
-                        }
-
-                        
-                        for (let i = 0; i < blockTrx.length; i++)
-                        {
-                        
-                            let thisTx = blockTrx[i];
-
-                            if (thisTx.txid == transactionid && thisTx.from != seederAddress)
-                            {
-
-                                var tdetails = [];
-
-                                var ddetails = {
-                                    amount: Big(thisTx.amount).div(10**4).toFixed(4),
-                                    fee: Big(thisTx.fee).div(10**4).toFixed(4),
-                                    type: thisTx.from==''?"generate":"transfer",
-                                    fromaddress: thisTx.from,
-                                    toaddress: thisTx.to
-                                };
-            
-                                tdetails.push(ddetails);
-                                
-                                var confirmations = 0;
-                                
-                                try {
-                                
-                                    var currentNetworkInfo = await this.getNetworkInfo();
-                                    confirmations = currentNetworkInfo.blockheight - blockInfo.height;
-                                    
-                                } catch (e) {
-                                
-                                }
-
-                                var status = 'pending';
-                                if (confirmations > 0) status = 'confirmed';
-                                if (confirmations < 0) status = 'error';
-
-                                var transinfo = {
-                                    totalamount: Big(thisTx.amount).div(10**4).toFixed(4),
-                                    blockhash: blockInfo.blockhash,
-                                    blocknumber: blockInfo.height,
-                                    txid: thisTx.txid,
-                                    id: thisTx.txid,
-                                    fee: Big(thisTx.fee).div(10**4).toFixed(4),
-                                    status: status,
-                                    confirmations: confirmations,
-                                    timestamp: {
-                                        human: new Date(thisTx.timestamp * 1000).toLocaleString("en-US"),
-                                        unix: parseInt(thisTx.timestamp)
-                                    },
-                                    details: tdetails,
-                                    raw: thisTx
-                                };
-
-                                resolve(transinfo);
-
-                                break;
-                            
+                            try {
+                                blockInfo = await this.getBlock(body[0].blockId);
+                                blockTrx = blockInfo.transactions;
+                            } catch (e) {
+                                reject('Not Found');
                             }
-
+        
+                            for (let i = 0; i < blockTrx.length; i++) {
+                                let thisTx = blockTrx[i];
+                                if (thisTx.txid == transactionid && thisTx.from != seederAddress) {
+                                    var tdetails = [];
+                                    var ddetails = {
+                                        amount: Big(thisTx.amount).div(10**4).toFixed(4),
+                                        fee: Big(thisTx.fee).div(10**4).toFixed(4),
+                                        type: thisTx.from==''?"generate":"transfer",
+                                        fromaddress: thisTx.from,
+                                        toaddress: thisTx.to
+                                    };
+        
+                                    tdetails.push(ddetails);
+        
+                                    var confirmations = 0;
+                                    try {
+                                        var currentNetworkInfo = await this.getNetworkInfo();
+                                        confirmations = currentNetworkInfo.blockheight - blockInfo.height;
+                                    } catch (e) {}
+        
+                                    var status = 'pending';
+                                    if (confirmations > 0) status = 'confirmed';
+                                    if (confirmations < 0) status = 'error';
+        
+                                    var transinfo = {
+                                        totalamount: Big(thisTx.amount).div(10**4).toFixed(4),
+                                        blockhash: blockInfo.blockhash,
+                                        blocknumber: blockInfo.height,
+                                        txid: thisTx.txid,
+                                        id: thisTx.txid,
+                                        fee: Big(thisTx.fee).div(10**4).toFixed(4),
+                                        status: status,
+                                        confirmations: confirmations,
+                                        timestamp: {
+                                            human: new Date(thisTx.timestamp * 1000).toLocaleString("en-US"),
+                                            unix: parseInt(thisTx.timestamp)
+                                        },
+                                        details: tdetails,
+                                        raw: thisTx
+                                    };
+        
+                                    resolve(transinfo);
+                                    return; // Ensure we exit the loop and the function once the transaction is found
+                                }
+                            }
+                            reject('Not Found');
+                        } else {
+                            reject('Not Found');
                         }
-                    
-                        reject('Not Found');
-                    
+                    } catch (e) {
+                        reject(e);
                     }
-                    else
-                    {
-                    
-                        reject('Not Found');
-                    
-                    }
-
-                    
-                } catch (e) {
-                    reject(e);
-                }
-                
-            })();
-        })
-    }
+                })();
+            })
+        }
     
     /*
     
@@ -256,25 +207,23 @@ class PandaniteApi {
     
     */
 
-    getBalance(address) {
-        return new Promise((resolve, reject) => {
-            (async () => {
-
-                try {
-
-                    var body = await got.get(this.apiUrl + "/ledger?wallet=" + address).json(); 
-
-                    var balance = Big(body.balance).div(10**4).toFixed(8);
-
-                    resolve(balance);
-
-                } catch (e) {
-                    resolve("0");
-                }
-                
-            })();
-        })
-    }
+        getBalance(address) {
+            return new Promise((resolve) => {
+                (async () => {
+                    try {
+                        const response = await axios.get(`${this.apiUrl}/ledger?wallet=${address}`);
+                        if (response.data) {
+                            const balance = Big(response.data.balance).div(10**4).toFixed(8);
+                            resolve(balance);
+                        } else {
+                            resolve("0");
+                        }
+                    } catch (e) {
+                        resolve("0");
+                    }
+                })();
+            })
+        }
     
 
     
@@ -308,175 +257,115 @@ class PandaniteApi {
     
     */
     
-    submitTransaction(signedTxArray) {
-        return new Promise((resolve, reject) => {
-            (async () => {
-
-                try {
-                    
-                    var body = await got.post(this.apiUrl + "/add_transaction_json", {json: signedTxArray}).json(); 
-
-                    resolve(body);
-    
-                } catch (e) {
-                    reject(e);
-                }
-                
-            })();
-        })
-    }
+        submitTransaction(signedTxArray) {
+            return new Promise((resolve, reject) => {
+                (async () => {
+                    try {
+                        const response = await axios.post(`${this.apiUrl}/add_transaction_json`, signedTxArray);
+                        if (response.data) {
+                            resolve(response.data);
+                        } else {
+                            reject(new Error('No data received from the server.'));
+                        }
+                    } catch (e) {
+                        reject(e);
+                    }
+                })();
+            })
+        }
 
     /*
     
         Get all transactions for a given address
     
     */
-    getTransactionsForAddress(address) {
-    
-        return new Promise((resolve, reject) => {
-            (async () => {
-
-
-                const checkAddress = function(transaction) {
-
-                    return transaction.to == address || transaction.from == address;
-
-                }
-
-                try {
-                
-                    let transactionList = [];
-                    
-                    let getaccountTransactions = await got(this.apiUrl + "/wallet_transactions?wallet=" + address).json();
-        
-                    getaccountTransactions.sort((a, b) => {
-                        return b.timestamp - a.timestamp;
-                    });
-        
-                    transactionList = getaccountTransactions.filter(checkAddress);
-
-                    let pendingTransactions = await got(this.apiUrl + "/tx_json").json();
-                    pendingTransactions = pendingTransactions.filter(checkAddress);
-
-                    for (let i = 0; i < pendingTransactions.length; i++)
-                    {
-        
-                        let thisTx = pendingTransactions[i];
-                        thisTx.pending = true;
-            
-                        transactionList.unshift(thisTx);
-        
+        getTransactionsForAddress(address) {
+            return new Promise((resolve, reject) => {
+                (async () => {
+                    const checkAddress = function(transaction) {
+                        return transaction.to == address || transaction.from == address;
                     }
-
-                    resolve(transactionList);
-    
-                } catch (e) {
-                    reject(e);
-                }
-                
-            })();
-        })
-    
-    }
+        
+                    try {
+                        let transactionList = [];
+        
+                        const accountTransactionsResponse = await axios.get(`${this.apiUrl}/wallet_transactions?wallet=${address}`);
+                        let getaccountTransactions = accountTransactionsResponse.data;
+                        getaccountTransactions.sort((a, b) => b.timestamp - a.timestamp);
+                        transactionList = getaccountTransactions.filter(checkAddress);
+        
+                        const pendingTransactionsResponse = await axios.get(`${this.apiUrl}/tx_json`);
+                        let pendingTransactions = pendingTransactionsResponse.data.filter(checkAddress);
+        
+                        for (let i = 0; i < pendingTransactions.length; i++) {
+                            let thisTx = pendingTransactions[i];
+                            thisTx.pending = true;
+                            transactionList.unshift(thisTx);
+                        }
+        
+                        resolve(transactionList);
+                    } catch (e) {
+                        reject(e);
+                    }
+                })();
+            })
+        }
     
     /*
     
         filter is an array of addresses you would like to get a report on..  presumably addresses you own or ALL of you leave it empty
     
     */
-    getRecentTransactions(filter = [], blocksBack = 5) {
-        return new Promise((resolve, reject) => {
-            (async () => {
-
-                try {
-                
-                    var lastblock = await got.get(this.apiUrl + "/block_count").json();
-
-                    if (lastblock && lastblock > 0)
-                    {
-                    
-                        // block time is 90 seconds
-                    
-                        var newtxlist = [];
-                    
-                        var fromblock = lastblock - blocksBack;
-                        var toblock = lastblock
-                        
-                        for (let i = fromblock; i <= toblock; i++)
-                        {
-                        
-                            var thisBlockNumber = i;
-                            
-                            var blockInfo;
-                            
-                            try {
-
-                                blockInfo = await got.get(this.apiUrl + "/block?blockId=" + i).json();  
-
-                            } catch (e) {
-                            
-                            
-                            }
-                            
-                            if (blockInfo.transactions)
-                            {
-
-                                for (let j = 0; j < blockInfo.transactions.length; j++)
-                                {
-                    
-                                    var txinfo = blockInfo.transactions[j];
-                        
-                                    try {
-                                                                            
-                                        if (filter.length == 0 || filter.indexOf(txinfo.to) > -1 || filter.indexOf(txinfo.from) > -1)
-                                        {
-                                        
-                                            let confirmations = lastblock - i;
-
-                                            let newtx = {
+        getRecentTransactions(filter = [], blocksBack = 5) {
+            return new Promise((resolve, reject) => {
+                (async () => {
+                    try {
+                        const lastBlockResponse = await axios.get(`${this.apiUrl}/block_count`);
+                        const lastblock = lastBlockResponse.data;
+        
+                        if (lastblock && lastblock > 0) {
+                            let newtxlist = [];
+                            const fromblock = lastblock - blocksBack;
+                            const toblock = lastblock;
+        
+                            for (let i = fromblock; i <= toblock; i++) {
+                                let blockInfo;
+                                try {
+                                    const blockInfoResponse = await axios.get(`${this.apiUrl}/block?blockId=${i}`);
+                                    blockInfo = blockInfoResponse.data;
+                                } catch (e) {
+                                    // Handle any errors here if necessary
+                                }
+        
+                                if (blockInfo && blockInfo.transactions) {
+                                    for (let j = 0; j < blockInfo.transactions.length; j++) {
+                                        const txinfo = blockInfo.transactions[j];
+                                        if (filter.length === 0 || filter.includes(txinfo.to) || filter.includes(txinfo.from)) {
+                                            const confirmations = lastblock - i;
+                                            const newtx = {
                                                 id: txinfo.txid.toUpperCase(),
                                                 fromAddress: txinfo.from,
                                                 toAddress: txinfo.to,
-                                                type: txinfo.from==''?"generate":"transfer",
+                                                type: txinfo.from === '' ? "generate" : "transfer",
                                                 amount: Big(txinfo.amount).div(10**4).toFixed(4),
                                                 fee: Big(txinfo.fee).div(10**4).toFixed(4),
                                                 confirmations: confirmations
-                                            };  
-
+                                            };
                                             newtxlist.push(newtx);
-                                
-                                        }               
-
-                                    } catch (e) {
-                        
-                        
+                                        }
                                     }
-
                                 }
-                    
-
                             }
-
+                            resolve(newtxlist);
+                        } else {
+                            reject("Unable to get last block count");
                         }
-        
-                        resolve(newtxlist);
-                    
+                    } catch (e) {
+                        reject(e);
                     }
-                    else
-                    {
-                    
-                        reject("Unable to get last block count");
-                    
-                    }
-                    
-
-                } catch (e) {
-                    reject(e);
-                }
-                
-            })();
-        })
-    }
+                })();
+            });
+        }
 
 }
 
@@ -492,141 +381,113 @@ class PandaniteCrypto {
         
     */
 
-    generateNewAddress(password = "") {
+        generateNewAddress(password = "") {
 
-        const pad = function(n, width, z) {
-          z = z || '0';
-          n = n + '';
-          return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
-        }
-
-        try {
-
-            const entropy = crypto.randomBytes(16);
-            
-            let mnemonic = bip39.entropyToMnemonic(entropy);
-            
-            let seed = bip39.mnemonicToSeedSync(mnemonic, password);
-            
-            let seedhash = crypto.createHash('sha256').update(seed).digest(); //returns a buffer
-
-            let keyPair = ed25519.MakeKeypair(seedhash);
-
-            let bpublicKey = Buffer.from(keyPair.publicKey.toString("hex").toUpperCase(), "hex");
-
-            let hash = crypto.createHash('sha256').update(bpublicKey).digest();
-
-            let hash2 = crypto.createHash('ripemd160').update(hash).digest();
-
-            let hash3 = crypto.createHash('sha256').update(hash2).digest();
-
-            let hash4 = crypto.createHash('sha256').update(hash3).digest();
-
-            let checksum = hash4[0];
-
-            let addressArray = [];
-
-            addressArray[0] = '00';
-            for(let i = 1; i <= 20; i++) 
-            {
-                addressArray[i] = pad(hash2[i-1].toString(16), 2);
+            const pad = (n, width, z) => {
+                z = z || '0';
+                n = n + '';
+                return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
             }
-            addressArray[21] = pad(hash4[0].toString(16), 2);
-            addressArray[22] = pad(hash4[1].toString(16), 2);
-            addressArray[23] = pad(hash4[2].toString(16), 2);
-            addressArray[24] = pad(hash4[3].toString(16), 2);
-
-            let address = addressArray.join('').toUpperCase();
-
-            let newAccount = {
-                address: address,
-                seed: seed.toString("hex").toUpperCase(),
-                mnemonic: mnemonic,
-                seedPassword: password,
-                publicKey: keyPair.publicKey.toString("hex").toUpperCase(),
-                privateKey: keyPair.privateKey.toString("hex").toUpperCase()
-            };
-            
-            return newAccount;
-
-        } catch (e) {
-console.log(e);
-            return false;
-        }
-
-    }
-    
-    generateAddressFromMnemonic(mnemonic, password = "") {
-
-        let isValid = bip39.validateMnemonic(mnemonic);
-
-        if (isValid == false)
-        {
         
-            return false;
-        
-        }
-        else
-        {
-                        
-            const pad = function(n, width, z) {
-              z = z || '0';
-              n = n + '';
-              return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
-            }
-
             try {
-
-                let seed = bip39.mnemonicToSeedSync(mnemonic, password);
-
-                let seedhash = crypto.createHash('sha256').update(seed).digest(); //returns a buffer
-
-                let keyPair = ed25519.MakeKeypair(seedhash);
-
-                let bpublicKey = Buffer.from(keyPair.publicKey.toString("hex").toUpperCase(), "hex");
-
-                let hash = crypto.createHash('sha256').update(bpublicKey).digest();
-
-                let hash2 = crypto.createHash('ripemd160').update(hash).digest();
-
-                let hash3 = crypto.createHash('sha256').update(hash2).digest();
-
-                let hash4 = crypto.createHash('sha256').update(hash3).digest();
-
-                let checksum = hash4[0];
-
-                let addressArray = [];
-
-                addressArray[0] = '00';
-                for(let i = 1; i <= 20; i++) 
-                {
-                    addressArray[i] = pad(hash2[i-1].toString(16), 2);
-                }
-                addressArray[21] = pad(hash4[0].toString(16), 2);
-                addressArray[22] = pad(hash4[1].toString(16), 2);
-                addressArray[23] = pad(hash4[2].toString(16), 2);
-                addressArray[24] = pad(hash4[3].toString(16), 2);
-
-                let address = addressArray.join('').toUpperCase();
-
-                let newAccount = {
+                const entropy = CryptoJS.lib.WordArray.random(16).toString();
+                const mnemonic = bip39.entropyToMnemonic(entropy);
+                const seed = bip39.mnemonicToSeedSync(mnemonic, password);
+                
+                const seedhash = CryptoJS.SHA256(seed).toString(CryptoJS.enc.Hex);
+                
+                const keyPair = nacl.sign.keyPair.fromSeed(Uint8Array.from(Buffer.from(seedhash, 'hex')));
+        
+                const bpublicKey = Buffer.from(keyPair.publicKey);
+        
+                const hash = CryptoJS.SHA256(bpublicKey).toString(CryptoJS.enc.Hex);
+                const hash2 = CryptoJS.RIPEMD160(hash).toString(CryptoJS.enc.Hex);
+                const hash3 = CryptoJS.SHA256(hash2).toString(CryptoJS.enc.Hex);
+                const hash4 = CryptoJS.SHA256(hash3).toString(CryptoJS.enc.Hex);
+        
+                const checksum = hash4.substring(0, 2);
+        
+                let addressArray = ['00', ...Array.from(Buffer.from(hash2, 'hex').map(byte => pad(byte.toString(16), 2))), ...Array.from(Buffer.from(hash4, 'hex').slice(0, 4).map(byte => pad(byte.toString(16), 2)))];
+                const address = addressArray.join('').toUpperCase();
+        
+                const newAccount = {
                     address: address,
                     seed: seed.toString("hex").toUpperCase(),
                     mnemonic: mnemonic,
                     seedPassword: password,
-                    publicKey: keyPair.publicKey.toString("hex").toUpperCase(),
-                    privateKey: keyPair.privateKey.toString("hex").toUpperCase()
+                    publicKey: Buffer.from(keyPair.publicKey).toString("hex").toUpperCase(),
+                    privateKey: Buffer.from(keyPair.secretKey).toString("hex").toUpperCase()
                 };
-            
+                
                 return newAccount;
-
+        
             } catch (e) {
+                console.log(e);
                 return false;
             }
-            
         }
     
-    }
+        generateAddressFromMnemonic(mnemonic, password = "") {
+
+            let isValid = bip39.validateMnemonic(mnemonic);
+        
+            if (isValid == false) {
+                return false;
+            } else {
+                const pad = function(n, width, z) {
+                    z = z || '0';
+                    n = n + '';
+                    return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
+                }
+        
+                try {
+                    let seed = bip39.mnemonicToSeedSync(mnemonic, password);
+        
+                    let seedhash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(seed)).toString(CryptoJS.enc.Hex);
+        
+                    // Using tweetnacl for key pair generation
+                    let keyPair = nacl.sign.keyPair.fromSeed(new Uint8Array(seedhash.match(/[\da-f]{2}/gi).map(function (h) {
+                        return parseInt(h, 16)
+                    })));
+        
+                    let bpublicKey = keyPair.publicKey;
+        
+                    let hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(bpublicKey)).toString(CryptoJS.enc.Hex);
+                    let hash2 = CryptoJS.RIPEMD160(hash).toString(CryptoJS.enc.Hex);
+                    let hash3 = CryptoJS.SHA256(hash2).toString(CryptoJS.enc.Hex);
+                    let hash4 = CryptoJS.SHA256(hash3).toString(CryptoJS.enc.Hex);
+        
+                    let checksum = hash4[0];
+        
+                    let addressArray = [];
+                    addressArray[0] = '00';
+                    for(let i = 1; i <= 20; i++) {
+                        addressArray[i] = pad(hash2[i-1].toString(16), 2);
+                    }
+                    addressArray[21] = pad(hash4[0].toString(16), 2);
+                    addressArray[22] = pad(hash4[1].toString(16), 2);
+                    addressArray[23] = pad(hash4[2].toString(16), 2);
+                    addressArray[24] = pad(hash4[3].toString(16), 2);
+        
+                    let address = addressArray.join('').toUpperCase();
+        
+                    let newAccount = {
+                        address: address,
+                        seed: seed.toString("hex").toUpperCase(),
+                        mnemonic: mnemonic,
+                        seedPassword: password,
+                        publicKey: Array.from(keyPair.publicKey).map(byte => ('0' + (byte & 0xFF).toString(16)).slice(-2)).join('').toUpperCase(),
+                        privateKey: Array.from(keyPair.secretKey).map(byte => ('0' + (byte & 0xFF).toString(16)).slice(-2)).join('').toUpperCase()
+                    };
+                    
+                    return newAccount;
+        
+                } catch (e) {
+                    console.error(e);
+                    return false;
+                }
+            }
+        }
     
     /*
     
@@ -656,121 +517,83 @@ console.log(e);
     
     */
     
-    createSignedTransaction(toAddress, humanAmount, publicKey, privateKey) {
+        createSignedTransaction(toAddress, humanAmount, publicKey, privateKey) {
     
-        if (this.validateAddress(toAddress) == false) return false;
-    
-        try {
+            if (this.validateAddress(toAddress) == false) return false;
         
             const pad = function(n, width, z) {
-              z = z || '0';
-              n = n + '';
-              return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
+                z = z || '0';
+                n = n + '';
+                return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
             }
-
+        
             const unhexlify = function(str) { 
-              var result = [];
-              while (str.length >= 2) { 
-                result.push(parseInt(str.substring(0, 2), 16));
-                str = str.substring(2, str.length);
-              }
-              return new Uint8Array(result);
+                let result = [];
+                while (str.length >= 2) { 
+                    result.push(parseInt(str.substring(0, 2), 16));
+                    str = str.substring(2, str.length);
+                }
+                return new Uint8Array(result);
             }
-                        
+                            
             let formatAmount = parseInt(Big(humanAmount).times(10**4).toFixed(0));
             let nonce = Date.now();
             let fee = 1;
-
-            let keyPair = {
-                publicKey: Buffer.from(publicKey, 'hex'),
-                privateKey: Buffer.from(privateKey, 'hex')
-            }
-
+        
+            let keyPair = nacl.sign.keyPair.fromSeed(Buffer.from(privateKey, 'hex'));
+        
             let trxTimestamp = Date.now();
-
-            let hash = crypto.createHash('sha256').update(keyPair.publicKey).digest();
-
-            let hash2 = crypto.createHash('ripemd160').update(hash).digest();
-
-            let hash3 = crypto.createHash('sha256').update(hash2).digest();
-
-            let hash4 = crypto.createHash('sha256').update(hash3).digest();
-
+        
+            let hash = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey)).toString();
+            let hash2 = CryptoJS.RIPEMD160(hash).toString();
+            let hash3 = CryptoJS.SHA256(hash2).toString();
+            let hash4 = CryptoJS.SHA256(hash3).toString();
+        
             let checksum = hash4[0];
-
+        
             let addressArray = [];
-
+        
             addressArray[0] = '00';
-            for(let i = 1; i <= 20; i++) 
-            {
+            for(let i = 1; i <= 20; i++) {
                 addressArray[i] = pad(hash2[i-1].toString(16), 2);
             }
-            addressArray[21] = pad(hash4[0].toString(16), 2);
-            addressArray[22] = pad(hash4[1].toString(16), 2);
-            addressArray[23] = pad(hash4[2].toString(16), 2);
-            addressArray[24] = pad(hash4[3].toString(16), 2);
-
+            for(let i = 21; i <= 24; i++) {
+                addressArray[i] = pad(hash4[i-21].toString(16), 2);
+            }
+        
             let fromAddress = addressArray.join('').toUpperCase();
-            
+                
             let tx = {
-                        "from": fromAddress, 
-                        "to": toAddress, 
-                        "fee": fee,
-                        "amount": formatAmount, 
-                        "timestamp": trxTimestamp
-                    };
-
-            let ctx = crypto.createHash('sha256');
-    
-            ctx.update(unhexlify(tx["to"]));
-    
-            ctx.update(unhexlify(tx["from"]));
-
-            let hexfee = Buffer.from(parseInt(tx["fee"]).toString(16).padStart(16, '0'), 'hex');
-            let hexfeea = Buffer.from(hexfee).toJSON().data;
-            hexfeea.reverse();
-            let swapfee = Buffer.from(hexfeea).toString('hex');
-            ctx.update(unhexlify(swapfee));
-
-
-            let hexamount = Buffer.from(parseInt(tx["amount"]).toString(16).padStart(16, '0'), 'hex');
-            let hexamounta = Buffer.from(hexamount).toJSON().data;
-            hexamounta.reverse();
-            let swapamount = Buffer.from(hexamounta).toString('hex');
-            ctx.update(unhexlify(swapamount));
-
-            let hextimestamp = Buffer.from(parseInt(tx["timestamp"]).toString(16).padStart(16, '0'), 'hex');
-            let hextimestampa = Buffer.from(hextimestamp).toJSON().data;
-            hextimestampa.reverse();
-            let swaptimestamp = Buffer.from(hextimestampa).toString('hex');
-            ctx.update(unhexlify(swaptimestamp));
-    
-            let txc_hash = ctx.digest();
-
-            let signature = ed25519.Sign(txc_hash, keyPair); //Using Sign(Buffer, Keypair object)
-
-            let sig2 = signature.toString('hex').toUpperCase();
-
+                "from": fromAddress, 
+                "to": toAddress, 
+                "fee": fee,
+                "amount": formatAmount, 
+                "timestamp": trxTimestamp
+            };
+        
+            let ctx = CryptoJS.SHA256(
+                unhexlify(tx["to"]).concat(
+                    unhexlify(tx["from"]),
+                    unhexlify(pad(tx["fee"].toString(16), 16)),
+                    unhexlify(pad(tx["amount"].toString(16), 16)),
+                    unhexlify(pad(tx["timestamp"].toString(16), 16))
+                )
+            ).toString();
+        
+            let signature = nacl.sign.detached(ctx, keyPair.secretKey);
+        
             let tx_json = {
-                        "amount": tx.amount, 
-                        "fee": tx.fee, 
-                        "from": tx.from,
-                        "signature": sig2,
-                        "signingKey": publicKey, 
-                        "timestamp": String(tx.timestamp),
-                        "to": tx.to
-                        };
-    
+                "amount": tx.amount, 
+                "fee": tx.fee, 
+                "from": tx.from,
+                "signature": Buffer.from(signature).toString('hex').toUpperCase(),
+                "signingKey": publicKey, 
+                "timestamp": String(tx.timestamp),
+                "to": tx.to
+            };
+        
             return tx_json;
-        
-        } catch (e) {
-        
-console.log(e);
-        
-            return false;
         }
-    
-    }
     
     /*
     
@@ -808,7 +631,7 @@ console.log(e);
         Validate a message using publickey and signature
     
     
-    */
+    
     
     verifyMessage(message, publicKey, signature) {
     
@@ -823,6 +646,18 @@ console.log(e);
         }
     
     }
+    */
+    verifyMessage(message, publicKey, signature) {
+        const messageUint8 = decodeUTF8(message);
+        const publicKeyUint8 = decodeHex(publicKey);
+        const signatureUint8 = decodeHex(signature);
+    
+        if (nacl.sign.detached.verify(messageUint8, signatureUint8, publicKeyUint8)) {
+          return true;
+        } else {
+          return false;
+        }
+      }
 
     /*
     
@@ -831,47 +666,37 @@ console.log(e);
     
     */
     
-    walletAddressFromPublicKey(publicKey) {
-    
-        try {
-
-            const pad = function(n, width, z) {
-              z = z || '0';
-              n = n + '';
-              return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
+        walletAddressFromPublicKey(publicKey) {
+            try {
+              const pad = function(n, width, z) {
+                z = z || '0';
+                n = n + '';
+                return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
+              };
+        
+              let bpublicKey = Buffer.from(publicKey, 'hex');
+              let hash = CryptoJS.SHA256(bpublicKey).toString(CryptoJS.enc.Hex);
+              let hash2 = CryptoJS.RIPEMD160(hash).toString(CryptoJS.enc.Hex);
+              let hash3 = CryptoJS.SHA256(hash2).toString(CryptoJS.enc.Hex);
+              let hash4 = CryptoJS.SHA256(hash3).toString(CryptoJS.enc.Hex);
+        
+              let checksum = parseInt(hash4.substring(0, 2), 16);
+        
+              let address = ['00'];
+              for (let i = 0; i < hash2.length; i += 2) {
+                address.push(pad(hash2.substr(i, 2), 2));
+              }
+        
+              address.push(pad(checksum.toString(16), 2));
+              address.push(hash4.substr(2, 2));
+              address.push(hash4.substr(4, 2));
+              address.push(hash4.substr(6, 2));
+        
+              return address.join('').toUpperCase();
+            } catch (e) {
+              return false;
             }
-            
-            let bpublicKey = Buffer.from(publicKey, "hex");
-    
-            let hash = crypto.createHash('sha256').update(bpublicKey).digest();
-
-            let hash2 = crypto.createHash('ripemd160').update(hash).digest();
-
-            let hash3 = crypto.createHash('sha256').update(hash2).digest();
-
-            let hash4 = crypto.createHash('sha256').update(hash3).digest();
-    
-            let checksum = hash4[0];
-    
-            let address = [];
-    
-            address[0] = '00';
-            for(let i = 1; i <= 20; i++) 
-            {
-                address[i] = pad(hash2[i-1].toString(16), 2);
-            }
-            address[21] = pad(hash4[0].toString(16), 2);
-            address[22] = pad(hash4[1].toString(16), 2);
-            address[23] = pad(hash4[2].toString(16), 2);
-            address[24] = pad(hash4[3].toString(16), 2);
-    
-            return address.join('').toUpperCase();
-    
-        } catch (e) {
-            return false;
-        }
-    
-    }
+          }
 
 }
 
