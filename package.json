@@ -1,20 +1,18 @@
 {
   "name": "pandanite-js",
   "version": "1.0.0",
-  "description": "React Native Module for Interacting with Pandanite Crypto",
+  "description": "Nodejs Module for Interacting with Pandanite Crypto",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "repository": "https://github.com/WlinkNET/pandanite-js",
+  "repository": "https://github.com/pandanite-crypto/pandanite-js",
   "author": "Michael Osullivan",
   "license": "CC0-1.0",
   "dependencies": {
-    "axios": "^0.21.1",
     "big.js": "^6.2.1",
     "bip39": "^3.1.0",
-    "buffer": "^6.0.3",
-    "tweetnacl": "^1.0.3",
-    "tweetnacl-util": "^0.15.1"
+    "ed25519": "0.0.5",
+    "got": "^11.8.5"
   }
 }
