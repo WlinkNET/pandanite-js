@@ -4,6 +4,7 @@ const nacl = require('tweetnacl');
 const { decodeUTF8, decodeHex } = require('tweetnacl-util');
 const CryptoJS = require('react-native-crypto-js');
 const bip39     = require('bip39');
+const { Buffer } = require('buffer');
 
 class PandaniteApi {
 
